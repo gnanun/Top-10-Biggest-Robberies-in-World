@@ -77,7 +77,7 @@ def build_vectors(chunks, model_name="all-MiniLM-L6-v2"):
 
 
 # 4. LOAD BASE
-def load_base(pdf_path="data"):
+def load_base(pdf_path="datafiles"):
     chunks = []
     pdf_files = sorted(Path(pdf_path).glob("*.pdf"))
 

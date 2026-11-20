@@ -114,7 +114,7 @@ except (KeyError, FileNotFoundError):
 # 6. INITIALIZE RAG ENGINE
 @st.cache_resource
 def initiate_rag():
-    return load_base("data")
+    return load_base("datafiles")
 
 
 # 7. LOAD INDEX, EMBEDDING MODEL AND CHUNKS

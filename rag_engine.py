@@ -10,13 +10,22 @@ from pathlib import Path
 # 1. LOAD PDF
 def load_pdf(pdf_path):
     reader = PdfReader(str(pdf_path))  # Opens the PDF file.
-    pages = [page.extract_text() or "" for page in reader.pages]  # Extracts text from every page.
-    full_text = "\n".join(pages).strip()  # Combines all page texts into one string.
+    pages = []
 
-    if not full_text:  # Checks whether PDF contains readable text.
-        raise ValueError("No readable text found")
+    for page_number, page in enumerate(reader.pages, start=1):
+        page_text = page.extract_text() or ""  # Extracts text from each page.
+        page_text = page_text.strip()
 
-    return full_text  # Returns the extracted PDF text
+        if page_text:
+            pages.append({
+                "text": page_text,
+                "page": page_number
+            })
+
+    if not pages:
+        raise ValueError(f"No readable text found in {pdf_path.name}")
+
+    return pages
 
 
 # 2. CREATE CHUNKS

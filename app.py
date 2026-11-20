@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 from rag_engine import load_base, ask_rag
 
@@ -7,81 +8,466 @@ st.set_page_config(
     page_title="Top 10 Robbery Cases",
     page_icon="🔎",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
 # 2. CUSTOM CSS
 st.markdown("""
 <style>
+    :root {
+        --primary: #6C5CE7;
+        --primary-dark: #4B3FCC;
+        --accent: #00B894;
+        --bg-soft: #F5F3FF;
+        --text-main: #2D3436;
+        --text-muted: #636E72;
+        --border-soft: #E8E4F8;
+        --card-bg: #FFFFFF;
+    }
+
+    .stApp {
+        background: linear-gradient(180deg, #FAF9FF 0%, #F5F3FF 100%);
+    }
+
     .block-container {
         max-width: 1100px;
         padding-top: 2rem;
+        padding-bottom: 3rem;
     }
+
+    /* ---------- WELCOME PAGE ---------- */
+    .welcome-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding-top: 6vh;
+        padding-bottom: 2rem;
+    }
+    .welcome-icon {
+        font-size: 80px;
+        margin-bottom: 1rem;
+        animation: float 3s ease-in-out infinite;
+    }
+    @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
+    .welcome-title {
+        font-size: 48px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        background: linear-gradient(90deg, #6C5CE7, #00B894);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+    }
+    .welcome-subtitle {
+        font-size: 18px;
+        color: var(--text-muted);
+        max-width: 620px;
+        margin: 0 auto 2rem auto;
+        line-height: 1.6;
+    }
+    .welcome-badge {
+        display: inline-block;
+        background: #EDE9FE;
+        color: var(--primary);
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+    }
+    .feature-row {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-bottom: 2rem;
+    }
+    .feature-card {
+        background: white;
+        border: 1px solid var(--border-soft);
+        border-radius: 14px;
+        padding: 18px 22px;
+        width: 200px;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(108, 92, 231, 0.06);
+    }
+    .feature-card .icon { font-size: 28px; }
+    .feature-card .label {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-main);
+        margin-top: 8px;
+    }
+    .feature-card .desc {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    /* ---------- HEADER (main app) ---------- */
     .main-title {
         text-align: center;
-        font-size: 32px;
-        font-weight: bold;
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        background: linear-gradient(90deg, #6C5CE7, #00B894);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.2rem;
     }
     .sub-title {
         text-align: center;
-        color: gray;
+        color: var(--text-muted);
         font-size: 16px;
+        margin-bottom: 1.5rem;
     }
+
+    /* ---------- SIDEBAR ---------- */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #FFFFFF 0%, #F5F3FF 100%);
+        border-right: 1px solid var(--border-soft);
+    }
+    section[data-testid="stSidebar"] h1 {
+        color: var(--primary);
+        font-size: 22px;
+    }
+
+    /* ---------- CHAT BUBBLES ---------- */
+    div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-user"]) {
+        background: #EDE9FE;
+        border-left: 4px solid var(--primary);
+        border-radius: 12px;
+        padding: 0.6rem 1rem;
+        margin: 0.4rem 0;
+    }
+    div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-assistant"]) {
+        background: #FFFFFF;
+        border-left: 4px solid var(--accent);
+        border-radius: 12px;
+        padding: 0.6rem 1rem;
+        margin: 0.4rem 0;
+        box-shadow: 0 2px 8px rgba(108, 92, 231, 0.08);
+    }
+
+    /* ---------- CHAT INPUT ---------- */
+    div[data-testid="stChatInput"] {
+        border-radius: 14px;
+        border: 2px solid var(--border-soft);
+        background: white;
+    }
+    div[data-testid="stChatInput"]:focus-within {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+    }
+
+    /* ---------- BUTTONS ---------- */
+    .stButton > button {
+        background: linear-gradient(90deg, #6C5CE7, #00B894);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.7rem 2.2rem;
+        font-weight: 700;
+        font-size: 16px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(108, 92, 231, 0.35);
+    }
+
+    /* ---------- TABS ---------- */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 6px 14px;
+        background: #F5F3FF;
+    }
+    .stTabs [aria-selected="true"] {
+        background: var(--primary) !important;
+        color: white !important;
+    }
+
+    /* ---------- FLOWCHART ---------- */
+    .flow-step {
+        background: white;
+        border: 2px solid var(--border-soft);
+        border-radius: 10px;
+        padding: 10px 12px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-main);
+        transition: all 0.2s ease;
+    }
+    .flow-step:hover {
+        border-color: var(--primary);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(108, 92, 231, 0.15);
+    }
+    .flow-arrow {
+        text-align: center;
+        color: var(--primary);
+        font-size: 20px;
+        line-height: 1;
+        margin: 2px 0;
+    }
+    .team-card {
+        background: white;
+        border: 1px solid var(--border-soft);
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 6px;
+    }
+    .team-name {
+        font-weight: 600;
+        color: var(--text-main);
+        font-size: 14px;
+    }
+    .team-role {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    /* ---------- LOADING ---------- */
+    .loading-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding-top: 20vh;
+        text-align: center;
+    }
+    .loading-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--primary);
+        margin-bottom: 0.5rem;
+    }
+    .loading-sub {
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    /* ---------- SCROLLBAR ---------- */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #F5F3FF; }
+    ::-webkit-scrollbar-thumb {
+        background: #C7BFEF;
+        border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 </style>
 """, unsafe_allow_html=True)
 
 
-# 3. SIDEBAR
+# 3. STAGE STATE
+if "stage" not in st.session_state:
+    st.session_state.stage = "welcome"   # welcome → loading → app
+
+
+# =============================================================
+# STAGE 1 — WELCOME PAGE
+# =============================================================
+if st.session_state.stage == "welcome":
+
+    st.markdown("""
+    <div class="welcome-wrap">
+        <div class="welcome-icon">🔎</div>
+        <div class="welcome-badge">RAG-POWERED RESEARCH ASSISTANT</div>
+        <div class="welcome-title">Top 10 Robbery Cases</div>
+        <div class="welcome-subtitle">
+            Ask questions about ten of the world's most significant
+            robberies — values, methods, investigations, and outcomes —
+            answered only from the verified case documents.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Feature cards
+    st.markdown("""
+    <div class="feature-row">
+        <div class="feature-card">
+            <div class="icon">📚</div>
+            <div class="label">10 Case Studies</div>
+            <div class="desc">Verified robbery documents</div>
+        </div>
+        <div class="feature-card">
+            <div class="icon">🧠</div>
+            <div class="label">Grounded Answers</div>
+            <div class="desc">No outside knowledge used</div>
+        </div>
+        <div class="feature-card">
+            <div class="icon">⚡</div>
+            <div class="label">Fast Retrieval</div>
+            <div class="desc">FAISS + Groq LLM</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Start button (centered)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🚀 Start", use_container_width=True):
+            st.session_state.stage = "loading"
+            st.rerun()
+
+    st.markdown(
+        "<div style='text-align:center; color:#9b9b9b; "
+        "font-size:12px; margin-top:2rem;'>"
+        "Group-05 · Gnanesh N · Akshaya K N · Bhavyashree · "
+        "Hanamanthraya D G · Ashok · Deepti B D</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.stop()
+
+
+# =============================================================
+# STAGE 2 — LOADING SCREEN
+# =============================================================
+if st.session_state.stage == "loading":
+
+    st.markdown("""
+    <div class="loading-wrap">
+        <div class="loading-title">⚙️ Preparing your assistant…</div>
+        <div class="loading-sub">Loading case documents and building the search index</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    progress = st.progress(0)
+    status = st.empty()
+
+    steps = [
+        ("📂 Loading PDF documents…", 20),
+        ("📄 Extracting text…", 40),
+        ("✂️ Creating chunks…", 60),
+        ("🔢 Generating embeddings…", 80),
+        ("🗄 Building FAISS index…", 100),
+    ]
+
+    for msg, pct in steps:
+        status.info(msg)
+        time.sleep(0.4)
+        progress.progress(pct)
+
+    st.session_state.stage = "app"
+    st.rerun()
+
+
+# =============================================================
+# STAGE 3 — MAIN APP
+# =============================================================
+# Re-expand sidebar for main app
+st.markdown(
+    "<style>section[data-testid='stSidebar'] "
+    "{display:block !important;}</style>",
+    unsafe_allow_html=True,
+)
+
+
+# ---------- SIDEBAR ----------
 with st.sidebar:
-    st.title("Project Information")
-    info, pipeline = st.tabs(["Info", "Pipeline"])
+    st.markdown("## 🔎 Project Information")
 
+    info, pipeline, team = st.tabs(["📘 Info", "⚙️ Pipeline", "👥 Team"])
+
+    # 3a + 3b
     with info:
-        st.subheader("Technology Used")
-        st.write("""
-        - Python
-        - Streamlit
-        - PyPDF
-        - Sentence Transformers
-        - FAISS
-        - Groq LLM
-        """)
-        st.divider()
-        st.subheader("Description")
-        st.write("""
-        This application uses Retrieval-Augmented Generation
-        to answer questions based on ten major robbery cases.
+        st.markdown("### 📝 About the Project")
+        st.info(
+            "This application uses Retrieval-Augmented Generation (RAG) "
+            "to answer questions based on ten major robbery cases. "
+            "Answers are grounded in the uploaded PDF documents."
+        )
 
-        Answers are generated using information retrieved
-        from the uploaded PDF documents.
+        st.markdown("### 🛠 Technologies Used")
+        st.markdown("""
+        - 🐍 **Python** — core language
+        - 🎈 **Streamlit** — frontend UI
+        - 📄 **PyPDF** — PDF text extraction
+        - 🧠 **Sentence Transformers** — embeddings
+        - 🔍 **FAISS** — vector similarity search
+        - ⚡ **Groq LLM** — answer generation
         """)
-        st.divider()
-        st.subheader("Team Details")
-        st.write("Developed by: Gnanesh N")
 
+        st.divider()
+        st.caption("📚 Knowledge base: 10 robbery case PDFs")
+
+    # 3c
     with pipeline:
-        st.subheader("RAG Pipeline")
-        st.write("""
-        1. Load PDF Documents
-        2. Extract Text
-        3. Create Text Chunks
-        4. Generate Embeddings
-        5. Store Vectors in FAISS
-        6. Retrieve Relevant Content
-        7. Generate Answers using Groq
-        """)
+        st.markdown("### 🔄 RAG Pipeline Flow")
+
+        steps = [
+            ("📂", "Load PDF Documents"),
+            ("📄", "Extract Text"),
+            ("✂️", "Create Text Chunks"),
+            ("🔢", "Generate Embeddings"),
+            ("🗄", "Store Vectors in FAISS"),
+            ("🎯", "Retrieve Relevant Content"),
+            ("🤖", "Generate Answer (Groq)"),
+        ]
+
+        for i, (icon, label) in enumerate(steps):
+            st.markdown(
+                f'<div class="flow-step">{icon} {label}</div>',
+                unsafe_allow_html=True,
+            )
+            if i < len(steps) - 1:
+                st.markdown(
+                    '<div class="flow-arrow">▼</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.divider()
+        st.caption(
+            "Offline phase: steps 1–5 (build index). "
+            "Online phase: steps 6–7 (query time)."
+        )
+
+    # 3d — team
+    with team:
+        st.markdown("### 👥 Group-05")
+        st.caption("Top 10 Robbery Cases — RAG Project")
+
+        members = [
+            ("Gnanesh N", "Developer"),
+            ("Akshaya K N", "Team Member"),
+            ("Bhavyashree", "Team Member"),
+            ("Hanamanthraya D G", "Team Member"),
+            ("Ashok", "Team Member"),
+            ("Deepti B D", "Team Member"),
+        ]
+
+        for name, role in members:
+            st.markdown(
+                f'<div class="team-card">'
+                f'<div class="team-name">👤 {name}</div>'
+                f'<div class="team-role">{role}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
 
-# 4. MAIN TITLE
+# ---------- MAIN HEADER ----------
 st.markdown('<div class="main-title">Top 10 Robbery Cases</div>',
             unsafe_allow_html=True)
 st.markdown('<div class="sub-title">RAG-Based Research Assistant</div>',
             unsafe_allow_html=True)
+st.caption(
+    "🔎 Ask about the ten major robberies — values, methods, "
+    "investigations, and outcomes — answered only from the case documents."
+)
 st.write("")
 
 
-# 5. GROQ API KEY
+# ---------- GROQ KEY ----------
 try:
     mykey = st.secrets["GROQ_API_KEY"]
 except (KeyError, FileNotFoundError):
@@ -89,18 +475,17 @@ except (KeyError, FileNotFoundError):
 
 if not mykey:
     st.warning(
-        "Groq API key not configured. "
-        "Add GROQ_API_KEY to Streamlit Secrets."
+        "⚠️ Groq API key not configured. "
+        "Add `GROQ_API_KEY` to Streamlit Secrets."
     )
 
 
-# 6. INITIALIZE RAG ENGINE
+# ---------- RAG ENGINE ----------
 @st.cache_resource
 def initiate_rag():
     return load_base("datafiles")
 
 
-# 7. LOAD INDEX, EMBEDDING MODEL AND CHUNKS
 try:
     index, embed_model, chunks = initiate_rag()
 except Exception as error:
@@ -108,32 +493,24 @@ except Exception as error:
     st.stop()
 
 
-# 8. INITIALIZE CHAT HISTORY
+# ---------- CHAT ----------
 if "chat_hist" not in st.session_state:
     st.session_state.chat_hist = []
 
-
-# 9. DISPLAY PREVIOUS CHAT MESSAGES
 for qa in st.session_state.chat_hist:
     with st.chat_message(qa["role"]):
         st.write(qa["content"])
 
+question = st.chat_input("💬 Ask anything about the top 10 robbery cases...")
 
-# 10. ACCEPT USER QUESTION
-question = st.chat_input("Ask anything about the top 10 robbery cases...")
-
-
-# 11. GENERATE ANSWER
-if question:
-    st.session_state.chat_hist.append(
-        {"role": "user", "content": question}
-    )
+if question and question.strip():
+    st.session_state.chat_hist.append({"role": "user", "content": question})
 
     with st.chat_message("user"):
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching robbery case documents..."):
+        with st.spinner("🔍 Searching robbery case documents..."):
             try:
                 if not mykey:
                     raise ValueError(
@@ -142,12 +519,8 @@ if question:
                     )
 
                 answer = ask_rag(
-                    question,
-                    embed_model,
-                    chunks,
-                    index,
-                    api_key=mykey,
-                    num_chunks=10,      # explicit retrieval depth
+                    question, embed_model, chunks, index,
+                    api_key=mykey, num_chunks=5,
                 )
                 st.write(answer)
 
@@ -159,9 +532,21 @@ if question:
                 {"role": "assistant", "content": answer}
             )
 
+elif question is not None:
+    st.warning("Please enter a question.")
 
-# 12. CLEAR CHAT HISTORY
-if st.button("Clear Chat"):
-    st.session_state.chat_hist = []
-    st.toast("Chat history cleared")
-    st.rerun()
+
+# ---------- CLEAR / BACK ----------
+col1, col2, col3 = st.columns([1, 1, 1])
+with col2:
+    if st.button("🗑 Clear Chat", use_container_width=True):
+        st.session_state.chat_hist = []
+        st.toast("Chat history cleared ✨")
+        st.rerun()
+
+with st.sidebar:
+    st.divider()
+    if st.button("⬅ Back to Welcome", use_container_width=True):
+        st.session_state.stage = "welcome"
+        st.session_state.chat_hist = []
+        st.rerun()

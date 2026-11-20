@@ -1,36 +1,56 @@
-import faiss  # Used for similarity search.
 import re
-import numpy as np  # Used for numerical operations.
-from groq import Groq  # Connects to Groq LLM.
-from pypdf import PdfReader  # Reads PDF files.
-from sentence_transformers import SentenceTransformer  # Generates text embeddings.
+import faiss
+import numpy as np
+from groq import Groq
+from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
 from pathlib import Path
 
 
-# Files that are not heist case material and would only add noise.
-EXCLUDED_PREFIXES = ("GA-2003-72-RES-07",)
+# ---------------------------------------------------------------------------
+# 0. CONFIG
+# ---------------------------------------------------------------------------
+# PDFs whose filenames contain any of these substrings are skipped.
+EXCLUDE_PATTERNS = (
+    "interpol",
+    "ecb",
+    "co-operation agreement",
+    "cooperation agreement",
+)
+
+DEFAULT_CHUNK_SIZE = 350
+DEFAULT_OVERLAP = 80
+DEFAULT_NUM_CHUNKS = 10
 
 
-def pretty_source(filename):
-    # 'Antwerp_diamond_heist (2).pdf' -> 'Antwerp diamond heist'
-    name = Path(filename).stem
-    name = re.sub(r"\s*\(\d+\)$", "", name)
-    return name.replace("_", " ")
+# ---------------------------------------------------------------------------
+# 1. CLEAN TABLE MARKUP
+# ---------------------------------------------------------------------------
+def _clean_table_markup(text: str) -> str:
+    """Turn <table><tr><td>...</td></tr></table> noise into readable text."""
+    text = re.sub(r"</t[dh]>", " | ", text)
+    text = re.sub(r"</tr>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
 
 
-# 1. LOAD PDF
+# ---------------------------------------------------------------------------
+# 2. LOAD PDF
+# ---------------------------------------------------------------------------
 def load_pdf(pdf_path):
-    reader = PdfReader(str(pdf_path))  # Opens the PDF file.
+    reader = PdfReader(str(pdf_path))
     pages = []
 
     for page_number, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text() or ""  # Extracts text from each page.
-        page_text = page_text.strip()
+        page_text = page.extract_text() or ""
+        page_text = _clean_table_markup(page_text)
 
         if page_text:
             pages.append({
                 "text": page_text,
-                "page": page_number
+                "page": page_number,
             })
 
     if not pages:
@@ -39,9 +59,11 @@ def load_pdf(pdf_path):
     return pages
 
 
-# 2. CREATE CHUNKS
-def create_chunks(full_text, chunk_size=1000, overlap=200,
-                  source="Unknown", page=1):
+# ---------------------------------------------------------------------------
+# 3. CREATE CHUNKS
+# ---------------------------------------------------------------------------
+def create_chunks(full_text, chunk_size=DEFAULT_CHUNK_SIZE,
+                  overlap=DEFAULT_OVERLAP, source="Unknown", page=1):
     chunks = []
     start = 0
 
@@ -53,7 +75,7 @@ def create_chunks(full_text, chunk_size=1000, overlap=200,
             chunks.append({
                 "text": chunk,
                 "source": source,
-                "page": page
+                "page": page,
             })
 
         if end >= len(full_text):
@@ -64,20 +86,17 @@ def create_chunks(full_text, chunk_size=1000, overlap=200,
     return chunks
 
 
-# 3. BUILD VECTORS
+# ---------------------------------------------------------------------------
+# 4. BUILD VECTORS
+# ---------------------------------------------------------------------------
 def build_vectors(chunks, model_name="all-MiniLM-L6-v2"):
     if not chunks:
         raise ValueError("Cannot apply embeddings on empty chunks")
 
     embed_model = SentenceTransformer(model_name)
-
     texts = [chunk["text"] for chunk in chunks]
 
-    embed_vectors = embed_model.encode(
-        texts,
-        convert_to_numpy=True
-    )
-
+    embed_vectors = embed_model.encode(texts, convert_to_numpy=True)
     embed_vectors = np.asarray(embed_vectors, dtype="float32")
     faiss.normalize_L2(embed_vectors)
 
@@ -87,46 +106,46 @@ def build_vectors(chunks, model_name="all-MiniLM-L6-v2"):
     return embed_model, index
 
 
-# 4. LOAD BASE
+# ---------------------------------------------------------------------------
+# 5. LOAD BASE
+# ---------------------------------------------------------------------------
 def load_base(pdf_path="datafiles"):
     chunks = []
+    pdf_files = sorted(Path(pdf_path).glob("*.pdf"))
+
+    # Filter out off-topic documents (ECB/Interpol resolution, etc.)
     pdf_files = [
-        p for p in sorted(Path(pdf_path).glob("*.pdf"))
-        if not p.name.startswith(EXCLUDED_PREFIXES)
+        p for p in pdf_files
+        if not any(pat in p.name.lower() for pat in EXCLUDE_PATTERNS)
     ]
 
     if not pdf_files:
         raise FileNotFoundError(
-            f"No PDF files found in '{pdf_path}'. "
-            "Keep all your case PDFs inside the data folder."
+            f"No relevant PDF files found in '{pdf_path}'. "
+            "Check EXCLUDE_PATTERNS or add your case PDFs."
         )
 
     for pdf in pdf_files:
         pages = load_pdf(pdf)
-
         for page_data in pages:
             page_chunks = create_chunks(
                 page_data["text"],
                 source=pdf.name,
-                page=page_data["page"]
+                page=page_data["page"],
             )
             chunks.extend(page_chunks)
 
-    # Build vectors only once after loading all PDFs.
     embed_model, index = build_vectors(chunks)
-
     return index, embed_model, chunks
 
 
-# 5. RETRIEVE CONTENT
-# Retrieval is spread across documents: the strongest chunks overall are kept,
-# plus the best chunk of every other case file that is reasonably relevant
-# (so broad questions cover many cases, specific ones stay focused).
+# ---------------------------------------------------------------------------
+# 6. RETRIEVE CONTENT (with dedupe)
+# ---------------------------------------------------------------------------
 def retrieve_content(question, embed_model, chunks, index,
-                     num_chunks=14, core_chunks=6, min_ratio=0.7):
+                     num_chunks=DEFAULT_NUM_CHUNKS):
     if not question.strip():
         raise ValueError("Question cannot be blank")
-
     if num_chunks < 1:
         raise ValueError("Request at least one chunk")
 
@@ -134,63 +153,52 @@ def retrieve_content(question, embed_model, chunks, index,
     query_vector = np.asarray(query_vector, dtype="float32")
     faiss.normalize_L2(query_vector)
 
-    # Score every chunk (the corpus is small), best first.
-    sim_scores, vec_indices = index.search(query_vector, len(chunks))
-    ranked = [
-        (float(sc), int(ix))
-        for sc, ix in zip(sim_scores[0], vec_indices[0]) if ix != -1
-    ]
+    # Over-fetch so we can dedupe down to num_chunks unique results.
+    fetch_k = min(num_chunks * 2, len(chunks))
+    sim_scores, vec_indices = index.search(query_vector, fetch_k)
 
-    top_score = ranked[0][0]
-    selected, chosen = [], set()
+    background = ""
+    sources = []
+    seen = set()
 
-    # Pass 1: the strongest chunks overall (deep context for specific questions).
-    for score, ix in ranked[:core_chunks]:
-        selected.append((score, ix))
-        chosen.add(ix)
-    covered = {chunks[ix]["source"] for _, ix in selected}
+    for score, chunk_index in zip(sim_scores[0], vec_indices[0]):
+        if chunk_index == -1:
+            continue
 
-    # Pass 2: best chunk of every other case file that is reasonably relevant
-    # (so broad questions are not answered from just one or two cases).
-    for score, ix in ranked:
-        if len(selected) >= num_chunks:
-            break
-        src = chunks[ix]["source"]
-        if src not in covered and score >= min_ratio * top_score:
-            selected.append((score, ix))
-            chosen.add(ix)
-            covered.add(src)
+        chunk = chunks[int(chunk_index)]
+        key = (chunk["source"], chunk["page"], chunk["text"][:80])
 
-    selected.sort(key=lambda x: x[0], reverse=True)
+        if key in seen:
+            continue
+        seen.add(key)
 
-    background, sources = "", []
-    for score, ix in selected:
-        chunk = chunks[ix]
-        case = pretty_source(chunk["source"])
         background += (
-            f"Case file: {case}, Page: {chunk['page']}\n"
+            f"Source: {chunk['source']}, Page: {chunk['page']}\n"
             f"{chunk['text']}\n\n"
         )
-        label = f"{case} (page {chunk['page']})"
-        if label not in sources:
-            sources.append(label)
+
+        source_name = f"{chunk['source']} (page {chunk['page']})"
+        if source_name not in sources:
+            sources.append(source_name)
+
+        if len(seen) >= num_chunks:
+            break
 
     return background, sources
 
 
-# 6. ASK RAG
+# ---------------------------------------------------------------------------
+# 7. ASK RAG
+# ---------------------------------------------------------------------------
 def ask_rag(question, embed_model, chunks, index, api_key,
-             num_chunks=14, model_name="openai/gpt-oss-120b"):
+            num_chunks=DEFAULT_NUM_CHUNKS,
+            model_name="openai/gpt-oss-120b"):
 
     if not api_key:
         raise ValueError("API Key Missing")
 
     background, sources = retrieve_content(
-        question,
-        embed_model,
-        chunks,
-        index,
-        num_chunks
+        question, embed_model, chunks, index, num_chunks
     )
 
     prompt = f"""You are a research assistant specializing in major robbery cases.
@@ -198,11 +206,15 @@ def ask_rag(question, embed_model, chunks, index, api_key,
 Answer the user's question using ONLY the document background below.
 Do not invent, assume, or add facts from outside the documents.
 If the information is unavailable, say "Information Missing".
-Clearly distinguish confirmed facts from allegations or reported claims.
-When possible, identify the relevant robbery case.
-If the question is broad or comparative, cover EVERY relevant case found in the
-background, not just the first one or two, and name each case explicitly.
-Do not create source references that are not present in the background.
+
+Rules for conflicting or uncertain data:
+- If sources disagree on a figure (value, date, count), state the range
+  and note that estimates vary between sources. Do not silently pick one.
+- Clearly distinguish confirmed facts from allegations or reported claims.
+- For recent or ongoing cases (e.g. the 2025 Louvre theft), state the
+  status as of the source document and note that it may be out of date.
+- When possible, identify the relevant robbery case by name.
+- Do not create source references that are not present in the background.
 
 Document Background:
 {background}
@@ -223,16 +235,16 @@ Answer:
                 "content": (
                     "You are a document-grounded research assistant. "
                     "Use only the supplied context."
-                )
+                ),
             },
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt},
         ],
-        temperature=0.2
+        temperature=0.2,
     )
 
     answer = response.choices[0].message.content.strip()
 
-    if sources and "information missing" not in answer.lower():
+    if sources:
         answer += "\n\nSources:\n" + "\n".join(
             f"- {source}" for source in sources
         )

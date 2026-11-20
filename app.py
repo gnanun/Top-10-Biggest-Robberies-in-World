@@ -1,4 +1,3 @@
-
 import streamlit as st
 from rag_engine import load_base, ask_rag
 
@@ -8,7 +7,7 @@ st.set_page_config(
     page_title="Top 10 Robbery Cases",
     page_icon="🔎",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded",
 )
 
 
@@ -19,13 +18,11 @@ st.markdown("""
         max-width: 1100px;
         padding-top: 2rem;
     }
-
     .main-title {
         text-align: center;
         font-size: 32px;
         font-weight: bold;
     }
-
     .sub-title {
         text-align: center;
         color: gray;
@@ -37,15 +34,11 @@ st.markdown("""
 
 # 3. SIDEBAR
 with st.sidebar:
-
     st.title("Project Information")
-
     info, pipeline = st.tabs(["Info", "Pipeline"])
 
     with info:
-
         st.subheader("Technology Used")
-
         st.write("""
         - Python
         - Streamlit
@@ -54,11 +47,8 @@ with st.sidebar:
         - FAISS
         - Groq LLM
         """)
-
         st.divider()
-
         st.subheader("Description")
-
         st.write("""
         This application uses Retrieval-Augmented Generation
         to answer questions based on ten major robbery cases.
@@ -66,19 +56,12 @@ with st.sidebar:
         Answers are generated using information retrieved
         from the uploaded PDF documents.
         """)
-
         st.divider()
-
         st.subheader("Team Details")
-
         st.write("Developed by: Gnanesh N")
 
-        # Add other team members here if required.
-
     with pipeline:
-
         st.subheader("RAG Pipeline")
-
         st.write("""
         1. Load PDF Documents
         2. Extract Text
@@ -91,16 +74,10 @@ with st.sidebar:
 
 
 # 4. MAIN TITLE
-st.markdown(
-    '<div class="main-title">Top 10 Robbery Cases</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="sub-title">RAG-Based Research Assistant</div>',
-    unsafe_allow_html=True
-)
-
+st.markdown('<div class="main-title">Top 10 Robbery Cases</div>',
+            unsafe_allow_html=True)
+st.markdown('<div class="sub-title">RAG-Based Research Assistant</div>',
+            unsafe_allow_html=True)
 st.write("")
 
 
@@ -109,6 +86,12 @@ try:
     mykey = st.secrets["GROQ_API_KEY"]
 except (KeyError, FileNotFoundError):
     mykey = None
+
+if not mykey:
+    st.warning(
+        "Groq API key not configured. "
+        "Add GROQ_API_KEY to Streamlit Secrets."
+    )
 
 
 # 6. INITIALIZE RAG ENGINE
@@ -120,7 +103,6 @@ def initiate_rag():
 # 7. LOAD INDEX, EMBEDDING MODEL AND CHUNKS
 try:
     index, embed_model, chunks = initiate_rag()
-
 except Exception as error:
     st.error(f"Unable to load RAG engine: {error}")
     st.stop()
@@ -133,38 +115,30 @@ if "chat_hist" not in st.session_state:
 
 # 9. DISPLAY PREVIOUS CHAT MESSAGES
 for qa in st.session_state.chat_hist:
-
     with st.chat_message(qa["role"]):
         st.write(qa["content"])
 
 
 # 10. ACCEPT USER QUESTION
-question = st.chat_input(
-    "Ask anything about the top 10 robbery cases..."
-)
+question = st.chat_input("Ask anything about the top 10 robbery cases...")
 
 
 # 11. GENERATE ANSWER
 if question:
-
     st.session_state.chat_hist.append(
-        {
-            "role": "user",
-            "content": question
-        }
+        {"role": "user", "content": question}
     )
 
     with st.chat_message("user"):
         st.write(question)
 
     with st.chat_message("assistant"):
-
         with st.spinner("Searching robbery case documents..."):
-
             try:
                 if not mykey:
                     raise ValueError(
-                        "Groq API key is missing. Configure GROQ_API_KEY in Streamlit Secrets."
+                        "Groq API key is missing. "
+                        "Configure GROQ_API_KEY in Streamlit Secrets."
                     )
 
                 answer = ask_rag(
@@ -172,9 +146,9 @@ if question:
                     embed_model,
                     chunks,
                     index,
-                    api_key=mykey
+                    api_key=mykey,
+                    num_chunks=10,      # explicit retrieval depth
                 )
-
                 st.write(answer)
 
             except Exception as error:
@@ -182,21 +156,12 @@ if question:
                 st.error(answer)
 
             st.session_state.chat_hist.append(
-                {
-                    "role": "assistant",
-                    "content": answer
-                }
+                {"role": "assistant", "content": answer}
             )
 
 
 # 12. CLEAR CHAT HISTORY
-btn = st.button("Clear Chat")
-
-if btn:
-
+if st.button("Clear Chat"):
     st.session_state.chat_hist = []
-
-    st.success("Chat History Cleared Successfully!")
-
+    st.toast("Chat history cleared")
     st.rerun()
-

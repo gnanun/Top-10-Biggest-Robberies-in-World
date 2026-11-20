@@ -1,10 +1,21 @@
-
 import faiss  # Used for similarity search.
+import re
 import numpy as np  # Used for numerical operations.
 from groq import Groq  # Connects to Groq LLM.
 from pypdf import PdfReader  # Reads PDF files.
 from sentence_transformers import SentenceTransformer  # Generates text embeddings.
 from pathlib import Path
+
+
+# Files that are not heist case material and would only add noise.
+EXCLUDED_PREFIXES = ("GA-2003-72-RES-07",)
+
+
+def pretty_source(filename):
+    # 'Antwerp_diamond_heist (2).pdf' -> 'Antwerp diamond heist'
+    name = Path(filename).stem
+    name = re.sub(r"\s*\(\d+\)$", "", name)
+    return name.replace("_", " ")
 
 
 # 1. LOAD PDF
@@ -29,7 +40,7 @@ def load_pdf(pdf_path):
 
 
 # 2. CREATE CHUNKS
-def create_chunks(full_text, chunk_size=500, overlap=100,
+def create_chunks(full_text, chunk_size=1000, overlap=200,
                   source="Unknown", page=1):
     chunks = []
     start = 0
@@ -79,7 +90,10 @@ def build_vectors(chunks, model_name="all-MiniLM-L6-v2"):
 # 4. LOAD BASE
 def load_base(pdf_path="datafiles"):
     chunks = []
-    pdf_files = sorted(Path(pdf_path).glob("*.pdf"))
+    pdf_files = [
+        p for p in sorted(Path(pdf_path).glob("*.pdf"))
+        if not p.name.startswith(EXCLUDED_PREFIXES)
+    ]
 
     if not pdf_files:
         raise FileNotFoundError(
@@ -105,50 +119,68 @@ def load_base(pdf_path="datafiles"):
 
 
 # 5. RETRIEVE CONTENT
-def retrieve_content(question, embed_model, chunks, index, num_chunks=25):
+# Retrieval is spread across documents: the strongest chunks overall are kept,
+# plus the best chunk of every other case file that is reasonably relevant
+# (so broad questions cover many cases, specific ones stay focused).
+def retrieve_content(question, embed_model, chunks, index,
+                     num_chunks=14, core_chunks=6, min_ratio=0.7):
     if not question.strip():
         raise ValueError("Question cannot be blank")
 
     if num_chunks < 1:
         raise ValueError("Request at least one chunk")
 
-    query_vector = embed_model.encode(
-        [question],
-        convert_to_numpy=True
-    )
-
+    query_vector = embed_model.encode([question], convert_to_numpy=True)
     query_vector = np.asarray(query_vector, dtype="float32")
     faiss.normalize_L2(query_vector)
 
-    sim_scores, vec_indices = index.search(
-        query_vector,
-        min(num_chunks, len(chunks))
-    )
+    # Score every chunk (the corpus is small), best first.
+    sim_scores, vec_indices = index.search(query_vector, len(chunks))
+    ranked = [
+        (float(sc), int(ix))
+        for sc, ix in zip(sim_scores[0], vec_indices[0]) if ix != -1
+    ]
 
-    background = ""
-    sources = []
+    top_score = ranked[0][0]
+    selected, chosen = [], set()
 
-    for score, chunk_index in zip(sim_scores[0], vec_indices[0]):
-        if chunk_index != -1:
-            chunk = chunks[int(chunk_index)]
+    # Pass 1: the strongest chunks overall (deep context for specific questions).
+    for score, ix in ranked[:core_chunks]:
+        selected.append((score, ix))
+        chosen.add(ix)
+    covered = {chunks[ix]["source"] for _, ix in selected}
 
-            background += (
-                f"Source: {chunk['source']}, "
-                f"Page: {chunk['page']}\n"
-                f"{chunk['text']}\n\n"
-            )
+    # Pass 2: best chunk of every other case file that is reasonably relevant
+    # (so broad questions are not answered from just one or two cases).
+    for score, ix in ranked:
+        if len(selected) >= num_chunks:
+            break
+        src = chunks[ix]["source"]
+        if src not in covered and score >= min_ratio * top_score:
+            selected.append((score, ix))
+            chosen.add(ix)
+            covered.add(src)
 
-            source_name = f"{chunk['source']} (page {chunk['page']})"
+    selected.sort(key=lambda x: x[0], reverse=True)
 
-            if source_name not in sources:
-                sources.append(source_name)
+    background, sources = "", []
+    for score, ix in selected:
+        chunk = chunks[ix]
+        case = pretty_source(chunk["source"])
+        background += (
+            f"Case file: {case}, Page: {chunk['page']}\n"
+            f"{chunk['text']}\n\n"
+        )
+        label = f"{case} (page {chunk['page']})"
+        if label not in sources:
+            sources.append(label)
 
     return background, sources
 
 
 # 6. ASK RAG
 def ask_rag(question, embed_model, chunks, index, api_key,
-             num_chunks=3, model_name="openai/gpt-oss-120b"):
+             num_chunks=14, model_name="openai/gpt-oss-120b"):
 
     if not api_key:
         raise ValueError("API Key Missing")
@@ -168,6 +200,8 @@ Do not invent, assume, or add facts from outside the documents.
 If the information is unavailable, say "Information Missing".
 Clearly distinguish confirmed facts from allegations or reported claims.
 When possible, identify the relevant robbery case.
+If the question is broad or comparative, cover EVERY relevant case found in the
+background, not just the first one or two, and name each case explicitly.
 Do not create source references that are not present in the background.
 
 Document Background:
@@ -198,10 +232,9 @@ Answer:
 
     answer = response.choices[0].message.content.strip()
 
-    if sources:
+    if sources and "information missing" not in answer.lower():
         answer += "\n\nSources:\n" + "\n".join(
             f"- {source}" for source in sources
         )
 
     return answer
-

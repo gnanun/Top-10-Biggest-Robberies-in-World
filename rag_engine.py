@@ -10,22 +10,13 @@ from pathlib import Path
 # 1. LOAD PDF
 def load_pdf(pdf_path):
     reader = PdfReader(str(pdf_path))  # Opens the PDF file.
-    pages = []
+    pages = [page.extract_text() or "" for page in reader.pages]  # Extracts text from every page.
+    full_text = "\n".join(pages).strip()  # Combines all page texts into one string.
 
-    for page_number, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text() or ""  # Extracts text from each page.
-        page_text = page_text.strip()
+    if not full_text:  # Checks whether PDF contains readable text.
+        raise ValueError("No readable text found")
 
-        if page_text:
-            pages.append({
-                "text": page_text,
-                "page": page_number
-            })
-
-    if not pages:
-        raise ValueError(f"No readable text found in {pdf_path.name}")
-
-    return pages
+    return full_text  # Returns the extracted PDF text
 
 
 # 2. CREATE CHUNKS
@@ -105,7 +96,7 @@ def load_base(pdf_path="datafiles"):
 
 
 # 5. RETRIEVE CONTENT
-def retrieve_content(question, embed_model, chunks, index, num_chunks=3):
+def retrieve_content(question, embed_model, chunks, index, num_chunks=25):
     if not question.strip():
         raise ValueError("Question cannot be blank")
 

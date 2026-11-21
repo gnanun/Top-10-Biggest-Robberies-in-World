@@ -372,88 +372,51 @@ st.markdown(
 )
 
 
-# ---------- SIDEBAR ----------
-with st.sidebar:
-    st.markdown("## 🔎 Project Information")
+# inside `with st.sidebar:` — replace the tabs line with:
+info, cases, pipeline, team = st.tabs(
+    ["📘 Info", "📚 Cases", "⚙️ Pipeline", "👥 Team"]
+)
 
-    info, pipeline, team = st.tabs(["📘 Info", "⚙️ Pipeline", "👥 Team"])
+# then add this block after the `with info:` block:
+with cases:
+    st.markdown("### 📚 Indexed Cases")
+    st.caption("These are the ten robberies in the knowledge base.")
 
-    # 3a + 3b
-    with info:
-        st.markdown("### 📝 About the Project")
-        st.info(
-            "This application uses Retrieval-Augmented Generation (RAG) "
-            "to answer questions based on ten major robbery cases. "
-            "Answers are grounded in the uploaded PDF documents."
+    case_list = [
+        ("CF-01", "Central Bank of Iraq", "2003", "Iraq", "disputed"),
+        ("CF-02", "Isabella Stewart Gardner Museum", "1990", "USA", "unsolved"),
+        ("CF-03", "City Bonds Robbery", "1990", "UK", "solved"),
+        ("CF-04", "Dar Es Salaam Bank", "2007", "Iraq", "unsolved"),
+        ("CF-05", "Dresden Green Vault", "2019", "Germany", "mostly solved"),
+        ("CF-06", "Carlton Cannes Hotel", "2013", "France", "unresolved"),
+        ("CF-07", "Antwerp Diamond Center", "2003", "Belgium", "solved"),
+        ("CF-08", "Louvre Crown Jewels", "2025", "France", "ongoing"),
+        ("CF-09", "Harry Winston Jewelry Store", "2008", "France", "mostly solved"),
+        ("CF-10", "Schiphol Airport", "2005", "Netherlands", "partially solved"),
+    ]
+
+    status_colors = {
+        "solved": ("#00B894", "#E8F8F5"),
+        "mostly solved": ("#00B894", "#E8F8F5"),
+        "partially solved": ("#F39C12", "#FEF5E7"),
+        "unsolved": ("#E17055", "#FDEDEC"),
+        "unresolved": ("#E17055", "#FDEDEC"),
+        "disputed": ("#F39C12", "#FEF5E7"),
+        "ongoing": ("#6C5CE7", "#EDE9FE"),
+    }
+
+    for code, name, year, country, status in case_list:
+        fg, bg = status_colors.get(status, ("#636E72", "#F5F3FF"))
+        st.markdown(
+            f'<div class="team-card">'
+            f'<div class="team-name">{code} · {name}</div>'
+            f'<div class="team-role">{year} · {country} · '
+            f'<span style="background:{bg}; color:{fg}; '
+            f'padding:2px 8px; border-radius:8px; font-weight:600;">'
+            f'{status}</span></div>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
-
-        st.markdown("### 🛠 Technologies Used")
-        st.markdown("""
-        - 🐍 **Python** — core language
-        - 🎈 **Streamlit** — frontend UI
-        - 📄 **PyPDF** — PDF text extraction
-        - 🧠 **Sentence Transformers** — embeddings
-        - 🔍 **FAISS** — vector similarity search
-        - ⚡ **Groq LLM** — answer generation
-        """)
-
-        st.divider()
-        st.caption("📚 Knowledge base: 10 robbery case PDFs")
-
-    # 3c
-    with pipeline:
-        st.markdown("### 🔄 RAG Pipeline Flow")
-
-        steps = [
-            ("📂", "Load PDF Documents"),
-            ("📄", "Extract Text"),
-            ("✂️", "Create Text Chunks"),
-            ("🔢", "Generate Embeddings"),
-            ("🗄", "Store Vectors in FAISS"),
-            ("🎯", "Retrieve Relevant Content"),
-            ("🤖", "Generate Answer (Groq)"),
-        ]
-
-        for i, (icon, label) in enumerate(steps):
-            st.markdown(
-                f'<div class="flow-step">{icon} {label}</div>',
-                unsafe_allow_html=True,
-            )
-            if i < len(steps) - 1:
-                st.markdown(
-                    '<div class="flow-arrow">▼</div>',
-                    unsafe_allow_html=True,
-                )
-
-        st.divider()
-        st.caption(
-            "Offline phase: steps 1–5 (build index). "
-            "Online phase: steps 6–7 (query time)."
-        )
-
-    # 3d — team
-    with team:
-        st.markdown("### 👥 Group-05")
-        st.caption("Top 10 Robbery Cases — RAG Project")
-
-        members = [
-            ("Gnanesh N", "Developer"),
-            ("Akshaya K N", "Team Member"),
-            ("Bhavyashree", "Team Member"),
-            ("Hanamanthraya D G", "Team Member"),
-            ("Ashok", "Team Member"),
-            ("Deepti B D", "Team Member"),
-        ]
-
-        for name, role in members:
-            st.markdown(
-                f'<div class="team-card">'
-                f'<div class="team-name">👤 {name}</div>'
-                f'<div class="team-role">{role}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
 
 # ---------- MAIN HEADER ----------
 st.markdown('<div class="main-title">Top 10 Robbery Cases</div>',
